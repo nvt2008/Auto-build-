@@ -19,15 +19,16 @@ jobs:
           git clone https://gitlab.com/nguyenviettien8d2008/auto-build.git source
           cd source
           
-          # Xóa sạch cache rác
           rm -rf .gradle build libs
           mkdir -p libs
           wget -q https://github.com/cabaletta/baritone/releases/download/v1.10.2/baritone-api-fabric-1.10.2.jar -O libs/baritone-api-fabric-1.10.2.jar
           
-          # Cấu hình Gradle Properties
+          # Tạo file mappings rỗng chuẩn bằng Python để Loom hiểu class_XXXX
+          python3 -c "open('empty-mappings.tiny', 'w').write('tiny\t2\t0\tofficial\tintermediary\n')"
+          
           echo "org.gradle.daemon=false" > gradle.properties
           
-          # Ghi đè file build.gradle.kts sử dụng Yarn mappings
+          # Ghi đè file build.gradle.kts sử dụng mappings rỗng và tắt remap
           cat > build.gradle.kts << 'EOF'
           plugins {
               id("fabric-loom") version "1.9.2"
@@ -37,19 +38,20 @@ jobs:
           repositories { mavenCentral() }
           dependencies {
               minecraft("com.mojang:minecraft:1.21.4")
-              mappings("net.fabricmc:yarn:1.21.4+build.8:v2")
+              mappings(files("empty-mappings.tiny"))
               modImplementation("net.fabricmc:fabric-loader:0.16.10")
               modImplementation("net.fabricmc.fabric-api:fabric-api:0.119.2+1.21.4")
               compileOnly(files("libs/baritone-api-fabric-1.10.2.jar"))
           }
           tasks.withType<JavaCompile>().configureEach { options.release.set(21) }
+          tasks.matching { it.name == "remapJar" || it.name == "remapSourcesJar" }.configureEach { enabled = false }
           EOF
           
           # Cài đặt Gradle 8.12
           sed -i 's/gradle-.*-bin.zip/gradle-8.12-bin.zip/' gradle/wrapper/gradle-wrapper.properties
           chmod +x gradlew
           
-          # CHẠY BUILD VỚI THAM SỐ JVM TRỰC TIẾP
+          # Chạy Build với tham số JVM trực tiếp
           ./gradlew clean build --no-daemon -Dorg.gradle.jvmargs="-Xmx3G --add-modules=jdk.zipfs"
 
       - name: Upload Mod
