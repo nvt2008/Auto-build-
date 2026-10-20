@@ -10,22 +10,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # BƯỚC QUAN TRỌNG: Cài đặt Java 21 trước khi làm bất cứ việc gì
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
       - name: Unzip and Setup
         run: |
-          # Giải nén
+          # Giải nén file zip
           unzip AutoBuilder-1.0.0-NoKey-Source.zip -d extracted
+          cd extracted/AutoBuilder-NoKey-Source
           
-          # Tìm thư mục chứa file gradlew và di chuyển vào trong đó
-          cd extracted
-          if [ -f "AutoBuilder-NoKey-Source/gradlew" ]; then
-            cd AutoBuilder-NoKey-Source
-          elif [ -d "*/gradlew" ]; then
-            cd */ 
-          fi
-          
-          # Ép Gradle sử dụng đúng Java 21 của GitHub Actions
-          echo "org.gradle.java.home=$JAVA_HOME" > gradle.properties
-          echo "org.gradle.jvmargs=-Xmx3G --add-modules=jdk.zipfs" >> gradle.properties
+          # Cấu hình Gradle (Không ép đường dẫn Java để nó tự nhận Java 21 từ bước trên)
+          echo "org.gradle.jvmargs=-Xmx3G" > gradle.properties
           echo "org.gradle.daemon=false" >> gradle.properties
           
           # Sửa lại file mappings (thêm cột named)
@@ -58,6 +57,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Mod-Output
-          path: |
-            extracted/**/build/libs/*.jar
-            extracted/build/libs/*.jar
+          path: extracted/AutoBuilder-NoKey-Source/build/libs/*.jar
