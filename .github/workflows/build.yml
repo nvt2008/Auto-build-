@@ -6,37 +6,28 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Install Java 21 via Apt
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y openjdk-21-jdk
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
 
       - name: Clone Code from GitLab
         run: |
-          # Tải code trực tiếp từ GitLab (sạch, không dính file rác Android)
           git clone https://gitlab.com/nguyenviettien8d2008/auto-build.git source
           cd source
           
-          # Xóa sạch cache
+          # Xóa sạch cache rác
           rm -rf .gradle build libs
           mkdir -p libs
-          
-          # Tải Baritone bản chuẩn
           wget -q https://github.com/cabaletta/baritone/releases/download/v1.10.2/baritone-api-fabric-1.10.2.jar -O libs/baritone-api-fabric-1.10.2.jar
           
-          # Tạo file mappings rỗng chuẩn
-          python3 -c "open('empty-mappings.tiny', 'w').write('tiny\t2\t0\tofficial\tintermediary\n')"
+          # Cấu hình Gradle Properties
+          echo "org.gradle.daemon=false" > gradle.properties
           
-          # Ép cấu hình môi trường Java
-          export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
-          export PATH=$JAVA_HOME/bin:$PATH
-          export JAVA_TOOL_OPTIONS="--add-modules=jdk.zipfs"
-          
-          echo "org.gradle.java.home=$JAVA_HOME" > gradle.properties
-          echo "org.gradle.jvmargs=-Xmx3G --add-modules=jdk.zipfs" >> gradle.properties
-          echo "org.gradle.daemon=false" >> gradle.properties
-          
-          # Ghi đè file build.gradle.kts
+          # Ghi đè file build.gradle.kts sử dụng Yarn mappings
           cat > build.gradle.kts << 'EOF'
           plugins {
               id("fabric-loom") version "1.9.2"
@@ -46,19 +37,20 @@ jobs:
           repositories { mavenCentral() }
           dependencies {
               minecraft("com.mojang:minecraft:1.21.4")
-              mappings(files("empty-mappings.tiny"))
+              mappings("net.fabricmc:yarn:1.21.4+build.8:v2")
               modImplementation("net.fabricmc:fabric-loader:0.16.10")
               modImplementation("net.fabricmc.fabric-api:fabric-api:0.119.2+1.21.4")
               compileOnly(files("libs/baritone-api-fabric-1.10.2.jar"))
           }
           tasks.withType<JavaCompile>().configureEach { options.release.set(21) }
-          tasks.matching { it.name == "remapJar" || it.name == "remapSourcesJar" }.configureEach { enabled = false }
           EOF
           
-          # Chạy Build
+          # Cài đặt Gradle 8.12
           sed -i 's/gradle-.*-bin.zip/gradle-8.12-bin.zip/' gradle/wrapper/gradle-wrapper.properties
           chmod +x gradlew
-          ./gradlew clean build --no-daemon
+          
+          # CHẠY BUILD VỚI THAM SỐ JVM TRỰC TIẾP
+          ./gradlew clean build --no-daemon -Dorg.gradle.jvmargs="-Xmx3G --add-modules=jdk.zipfs"
 
       - name: Upload Mod
         uses: actions/upload-artifact@v4
