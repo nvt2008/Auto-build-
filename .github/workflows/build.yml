@@ -5,6 +5,8 @@ on: [push, workflow_dispatch]
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      JAVA_TOOL_OPTIONS: "--add-modules=jdk.zipfs"
     steps:
       - uses: actions/checkout@v4
 
@@ -23,12 +25,11 @@ jobs:
           mkdir -p libs
           wget -q https://github.com/cabaletta/baritone/releases/download/v1.10.2/baritone-api-fabric-1.10.2.jar -O libs/baritone-api-fabric-1.10.2.jar
           
-          echo "org.gradle.daemon=false" > gradle.properties
+          # Cấu hình gradle.properties (Dùng tham số hợp lệ)
+          echo "org.gradle.jvmargs=-Xmx3G --add-modules=jdk.zipfs" > gradle.properties
+          echo "org.gradle.daemon=false" >> gradle.properties
           
-          # SỬA FILE GRADLEW ĐỂ NẠP MODULE JDK.ZIPFS
-          sed -i 's/DEFAULT_JVM_OPTS=.*/DEFAULT_JVM_OPTS='"'"'"-Xmx3G --add-modules=jdk.zipfs"'"'"'/' gradlew
-          
-          # CHẠY SCRIPT PYTHON CHUYỂN ĐỔI CODE
+          # CHẠY SCRIPT PYTHON CHUYỂN ĐỔI CODE TỪ INTERMEDIARY SANG YARN
           python3 << 'PYEOF'
           import os, re, urllib.request, zipfile
           
