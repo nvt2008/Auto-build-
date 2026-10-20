@@ -7,6 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       JAVA_TOOL_OPTIONS: "--add-modules=jdk.zipfs"
+      _JAVA_OPTIONS: "-Dfile.encoding=UTF-8 --add-modules=jdk.zipfs"
     steps:
       - uses: actions/checkout@v4
 
@@ -16,7 +17,7 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Clone and Auto-Convert
+      - name: Clone and Build
         run: |
           git clone https://gitlab.com/nguyenviettien8d2008/auto-build.git source
           cd source
@@ -25,51 +26,11 @@ jobs:
           mkdir -p libs
           wget -q https://github.com/cabaletta/baritone/releases/download/v1.10.2/baritone-api-fabric-1.10.2.jar -O libs/baritone-api-fabric-1.10.2.jar
           
+          # Tạo file mappings rỗng chuẩn xác bằng Python
+          python3 -c "open('empty-mappings.tiny', 'w').write('tiny\t2\t0\tofficial\tnamed\n')"
+          
           echo "org.gradle.jvmargs=-Xmx3G --add-modules=jdk.zipfs" > gradle.properties
           echo "org.gradle.daemon=false" >> gradle.properties
-          
-          # CHẠY SCRIPT PYTHON ĐÃ ĐƯỢC SỬA LỖI ĐỌC MAPPINGS
-          python3 << 'PYEOF'
-          import os, re, urllib.request, zipfile
-          
-          url = "https://maven.fabricmc.net/net/fabricmc/yarn/1.21.4+build.8/yarn-1.21.4+build.8-v2.jar"
-          urllib.request.urlretrieve(url, "yarn.jar")
-          with zipfile.ZipFile("yarn.jar", "r") as z:
-              z.extractall("yarn_mappings")
-              
-          mapping_dict = {}
-          with open("yarn_mappings/mappings/mappings.tiny", "r") as f:
-              for line in f:
-                  # Định dạng Tiny v2: c \t class_310 \t net/minecraft/client/MinecraftClient
-                  if line.startswith("c\t"):
-                      parts = line.strip().split("\t")
-                      if len(parts) >= 3:
-                          inter = parts[1]
-                          named = parts[2]
-                          mapping_dict[inter] = named
-          
-          print(f"Đã tải {len(mapping_dict)} class mappings. Bắt đầu chuyển đổi...")
-          
-          for root, dirs, files in os.walk("src"):
-              for file in files:
-                  if file.endswith(".java"):
-                      path = os.path.join(root, file)
-                      with open(path, "r", encoding="utf-8") as f:
-                          content = f.read()
-                      
-                      for inter, named in mapping_dict.items():
-                          named_pkg = named.replace("/", ".")
-                          # Thay thế các dòng import
-                          content = re.sub(r'import net\.minecraft\.' + inter + r'\s*;', f'import {named_pkg};', content)
-                          content = re.sub(r'import ' + inter + r'\s*;', f'import {named_pkg};', content)
-                          # Thay thế tên class trong code
-                          short_name = named.split("/")[-1]
-                          content = re.sub(r'\b' + inter + r'\b', short_name, content)
-                          
-                      with open(path, "w", encoding="utf-8") as f:
-                          f.write(content)
-          print("Đã chuyển đổi code Java thành công!")
-          PYEOF
           
           cat > build.gradle.kts << 'EOF'
           plugins {
@@ -80,12 +41,13 @@ jobs:
           repositories { mavenCentral() }
           dependencies {
               minecraft("com.mojang:minecraft:1.21.4")
-              mappings("net.fabricmc:yarn:1.21.4+build.8:v2")
+              mappings(files("empty-mappings.tiny"))
               modImplementation("net.fabricmc:fabric-loader:0.16.10")
               modImplementation("net.fabricmc.fabric-api:fabric-api:0.119.2+1.21.4")
               compileOnly(files("libs/baritone-api-fabric-1.10.2.jar"))
           }
           tasks.withType<JavaCompile>().configureEach { options.release.set(21) }
+          tasks.matching { it.name == "remapJar" || it.name == "remapSourcesJar" }.configureEach { enabled = false }
           EOF
           
           sed -i 's/gradle-.*-bin.zip/gradle-8.12-bin.zip/' gradle/wrapper/gradle-wrapper.properties
