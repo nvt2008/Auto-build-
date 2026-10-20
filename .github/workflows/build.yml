@@ -25,11 +25,10 @@ jobs:
           mkdir -p libs
           wget -q https://github.com/cabaletta/baritone/releases/download/v1.10.2/baritone-api-fabric-1.10.2.jar -O libs/baritone-api-fabric-1.10.2.jar
           
-          # Cấu hình gradle.properties (Dùng tham số hợp lệ)
           echo "org.gradle.jvmargs=-Xmx3G --add-modules=jdk.zipfs" > gradle.properties
           echo "org.gradle.daemon=false" >> gradle.properties
           
-          # CHẠY SCRIPT PYTHON CHUYỂN ĐỔI CODE TỪ INTERMEDIARY SANG YARN
+          # CHẠY SCRIPT PYTHON ĐÃ ĐƯỢC SỬA LỖI ĐỌC MAPPINGS
           python3 << 'PYEOF'
           import os, re, urllib.request, zipfile
           
@@ -41,17 +40,15 @@ jobs:
           mapping_dict = {}
           with open("yarn_mappings/mappings/mappings.tiny", "r") as f:
               for line in f:
-                  parts = line.strip().split("\t")
-                  if len(parts) >= 3 and parts[1] == "class":
-                      inter = None
-                      named = None
-                      for p in parts:
-                          if p.startswith("class_"):
-                              inter = p
-                          elif p.startswith("net/minecraft"):
-                              named = p
-                      if inter and named:
+                  # Định dạng Tiny v2: c \t class_310 \t net/minecraft/client/MinecraftClient
+                  if line.startswith("c\t"):
+                      parts = line.strip().split("\t")
+                      if len(parts) >= 3:
+                          inter = parts[1]
+                          named = parts[2]
                           mapping_dict[inter] = named
+          
+          print(f"Đã tải {len(mapping_dict)} class mappings. Bắt đầu chuyển đổi...")
           
           for root, dirs, files in os.walk("src"):
               for file in files:
@@ -62,8 +59,10 @@ jobs:
                       
                       for inter, named in mapping_dict.items():
                           named_pkg = named.replace("/", ".")
+                          # Thay thế các dòng import
                           content = re.sub(r'import net\.minecraft\.' + inter + r'\s*;', f'import {named_pkg};', content)
                           content = re.sub(r'import ' + inter + r'\s*;', f'import {named_pkg};', content)
+                          # Thay thế tên class trong code
                           short_name = named.split("/")[-1]
                           content = re.sub(r'\b' + inter + r'\b', short_name, content)
                           
