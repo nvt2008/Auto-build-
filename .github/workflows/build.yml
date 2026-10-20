@@ -14,7 +14,7 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Clone Code and Auto-Convert
+      - name: Clone and Auto-Convert
         run: |
           git clone https://gitlab.com/nguyenviettien8d2008/auto-build.git source
           cd source
@@ -25,39 +25,52 @@ jobs:
           
           echo "org.gradle.daemon=false" > gradle.properties
           
-          # Chạy script Python để tự động chuyển đổi class_XXXX sang tên Yarn
+          # SỬA FILE GRADLEW ĐỂ NẠP MODULE JDK.ZIPFS
+          sed -i 's/DEFAULT_JVM_OPTS=.*/DEFAULT_JVM_OPTS='"'"'"-Xmx3G --add-modules=jdk.zipfs"'"'"'/' gradlew
+          
+          # CHẠY SCRIPT PYTHON CHUYỂN ĐỔI CODE
           python3 << 'PYEOF'
           import os, re, urllib.request, zipfile
           
-          # Tải file mappings Yarn
           url = "https://maven.fabricmc.net/net/fabricmc/yarn/1.21.4+build.8/yarn-1.21.4+build.8-v2.jar"
           urllib.request.urlretrieve(url, "yarn.jar")
           with zipfile.ZipFile("yarn.jar", "r") as z:
               z.extractall("yarn_mappings")
               
-          # Đọc và tạo từ điển mapping
           mapping_dict = {}
           with open("yarn_mappings/mappings/mappings.tiny", "r") as f:
               for line in f:
                   parts = line.strip().split("\t")
-                  if len(parts) >= 4 and parts[1] == "class":
-                      mapping_dict[parts[0]] = parts[3]
+                  if len(parts) >= 3 and parts[1] == "class":
+                      inter = None
+                      named = None
+                      for p in parts:
+                          if p.startswith("class_"):
+                              inter = p
+                          elif p.startswith("net/minecraft"):
+                              named = p
+                      if inter and named:
+                          mapping_dict[inter] = named
           
-          # Quét toàn bộ file Java và thay thế
           for root, dirs, files in os.walk("src"):
               for file in files:
                   if file.endswith(".java"):
                       path = os.path.join(root, file)
                       with open(path, "r", encoding="utf-8") as f:
                           content = f.read()
+                      
                       for inter, named in mapping_dict.items():
-                          content = re.sub(r'\b' + inter + r'\b', named, content)
+                          named_pkg = named.replace("/", ".")
+                          content = re.sub(r'import net\.minecraft\.' + inter + r'\s*;', f'import {named_pkg};', content)
+                          content = re.sub(r'import ' + inter + r'\s*;', f'import {named_pkg};', content)
+                          short_name = named.split("/")[-1]
+                          content = re.sub(r'\b' + inter + r'\b', short_name, content)
+                          
                       with open(path, "w", encoding="utf-8") as f:
                           f.write(content)
-          print("Đã tự động chuyển đổi code Java thành công!")
+          print("Đã chuyển đổi code Java thành công!")
           PYEOF
           
-          # Ghi đè file build.gradle.kts sử dụng Yarn mappings chuẩn
           cat > build.gradle.kts << 'EOF'
           plugins {
               id("fabric-loom") version "1.9.2"
