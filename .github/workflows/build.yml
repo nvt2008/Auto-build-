@@ -5,36 +5,38 @@ on: [push, workflow_dispatch]
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      _JAVA_OPTIONS: "-Dfile.encoding=UTF-8 --add-modules=jdk.zipfs"
-      JAVA_TOOL_OPTIONS: "--add-modules=jdk.zipfs"
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          java-version: '21'
-          distribution: 'temurin'
-
-      - name: Setup and Build
+      - name: Install Java 21 via Apt
         run: |
-          unzip AutoBuilder-1.0.0-NoKey-Source.zip -d extracted
-          cd extracted/AutoBuilder-NoKey-Source
+          sudo apt-get update
+          sudo apt-get install -y openjdk-21-jdk
+
+      - name: Clone Code from GitLab
+        run: |
+          # Tải code trực tiếp từ GitLab (sạch, không dính file rác Android)
+          git clone https://gitlab.com/nguyenviettien8d2008/auto-build.git source
+          cd source
           
-          # 1. Dọn dẹp file rác và tải lại Baritone chuẩn
+          # Xóa sạch cache
           rm -rf .gradle build libs
           mkdir -p libs
+          
+          # Tải Baritone bản chuẩn
           wget -q https://github.com/cabaletta/baritone/releases/download/v1.10.2/baritone-api-fabric-1.10.2.jar -O libs/baritone-api-fabric-1.10.2.jar
           
-          # 2. Tạo file mappings rỗng chuẩn bằng Python (để hiểu class_XXXX)
+          # Tạo file mappings rỗng chuẩn
           python3 -c "open('empty-mappings.tiny', 'w').write('tiny\t2\t0\tofficial\tintermediary\n')"
           
-          # 3. Cấu hình Gradle Properties
-          echo "org.gradle.jvmargs=-Xmx3G" > gradle.properties
+          # Ép cấu hình môi trường Java
+          export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+          export PATH=$JAVA_HOME/bin:$PATH
+          export JAVA_TOOL_OPTIONS="--add-modules=jdk.zipfs"
+          
+          echo "org.gradle.java.home=$JAVA_HOME" > gradle.properties
+          echo "org.gradle.jvmargs=-Xmx3G --add-modules=jdk.zipfs" >> gradle.properties
           echo "org.gradle.daemon=false" >> gradle.properties
-
-          # 4. Ghi đè file build.gradle.kts
+          
+          # Ghi đè file build.gradle.kts
           cat > build.gradle.kts << 'EOF'
           plugins {
               id("fabric-loom") version "1.9.2"
@@ -53,7 +55,7 @@ jobs:
           tasks.matching { it.name == "remapJar" || it.name == "remapSourcesJar" }.configureEach { enabled = false }
           EOF
           
-          # 5. Cài đặt Gradle 8.12 và chạy build
+          # Chạy Build
           sed -i 's/gradle-.*-bin.zip/gradle-8.12-bin.zip/' gradle/wrapper/gradle-wrapper.properties
           chmod +x gradlew
           ./gradlew clean build --no-daemon
@@ -62,4 +64,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Mod-Output
-          path: extracted/AutoBuilder-NoKey-Source/build/libs/*.jar
+          path: source/build/libs/*.jar
