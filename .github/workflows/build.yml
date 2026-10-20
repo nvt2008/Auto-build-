@@ -8,42 +8,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          java-version: '21'
-          distribution: 'temurin'
-          java-package: jdk
+      - name: Install Java 21 via Apt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openjdk-21-jdk
 
       - name: Unzip and Setup
         run: |
           unzip AutoBuilder-1.0.0-NoKey-Source.zip -d extracted
           cd extracted/AutoBuilder-NoKey-Source
           
-          # Dọn dẹp cache cũ
+          # Xóa sạch mọi cache cũ
           rm -rf .gradle build
           
-          # Ép nạp module zipfs cho mọi tiến trình Java
+          # Ép cấu hình Gradle
+          export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+          export PATH=$JAVA_HOME/bin:$PATH
           export JAVA_TOOL_OPTIONS="--add-modules=jdk.zipfs"
-          echo "org.gradle.jvmargs=-Xmx3G --add-modules=jdk.zipfs" > gradle.properties
+          
+          echo "org.gradle.java.home=$JAVA_HOME" > gradle.properties
+          echo "org.gradle.jvmargs=-Xmx3G --add-modules=jdk.zipfs" >> gradle.properties
           echo "org.gradle.daemon=false" >> gradle.properties
           
-          # Tải file mappings thực tế của Fabric
-          wget -q https://maven.fabricmc.net/net/fabricmc/intermediary/1.21.4/intermediary-1.21.4-v2.jar -O intermediary.jar
-          mkdir -p mapped
-          unzip -q intermediary.jar -d mapped
-          
-          # Dùng Python "lách luật": Đổi tên namespace 'intermediary' thành 'named'
-          # Điều này giúp Loom biên dịch trực tiếp các file class_XXXX
-          python3 -c "
-          with open('mapped/mappings/mappings.tiny', 'r') as f:
-              lines = f.readlines()
-          lines[0] = 'tiny\t2\t0\tofficial\tnamed\n'
-          with open('custom-mappings.tiny', 'w') as f:
-              f.writelines(lines)
-          "
-          
-          # Ghi đè file cấu hình Build
+          # Ghi đè file build.gradle.kts sử dụng Yarn mappings
           cat > build.gradle.kts << 'EOF'
           plugins {
               id("fabric-loom") version "1.9.2"
@@ -53,14 +40,16 @@ jobs:
           repositories { mavenCentral() }
           dependencies {
               minecraft("com.mojang:minecraft:1.21.4")
-              mappings(files("custom-mappings.tiny"))
+              mappings("net.fabricmc:yarn:1.21.4+build.8:v2")
               modImplementation("net.fabricmc:fabric-loader:0.16.10")
               modImplementation("net.fabricmc.fabric-api:fabric-api:0.119.2+1.21.4")
               modCompileOnly(files("libs/baritone-api-fabric-1.10.2.jar"))
           }
           tasks.withType<JavaCompile>().configureEach { options.release.set(21) }
-          tasks.matching { it.name == "remapJar" || it.name == "remapSourcesJar" }.configureEach { enabled = false }
           EOF
+          
+          # Nâng cấp Gradle wrapper lên 8.12
+          sed -i 's/gradle-.*-bin.zip/gradle-8.12-bin.zip/' gradle/wrapper/gradle-wrapper.properties
           
           chmod +x gradlew
           ./gradlew clean build --no-daemon
