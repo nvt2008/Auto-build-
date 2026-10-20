@@ -14,7 +14,7 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Clone Code from GitLab
+      - name: Clone Code and Auto-Convert
         run: |
           git clone https://gitlab.com/nguyenviettien8d2008/auto-build.git source
           cd source
@@ -23,12 +23,41 @@ jobs:
           mkdir -p libs
           wget -q https://github.com/cabaletta/baritone/releases/download/v1.10.2/baritone-api-fabric-1.10.2.jar -O libs/baritone-api-fabric-1.10.2.jar
           
-          # Tạo file mappings rỗng chuẩn bằng Python để Loom hiểu class_XXXX
-          python3 -c "open('empty-mappings.tiny', 'w').write('tiny\t2\t0\tofficial\tintermediary\n')"
-          
           echo "org.gradle.daemon=false" > gradle.properties
           
-          # Ghi đè file build.gradle.kts sử dụng mappings rỗng và tắt remap
+          # Chạy script Python để tự động chuyển đổi class_XXXX sang tên Yarn
+          python3 << 'PYEOF'
+          import os, re, urllib.request, zipfile
+          
+          # Tải file mappings Yarn
+          url = "https://maven.fabricmc.net/net/fabricmc/yarn/1.21.4+build.8/yarn-1.21.4+build.8-v2.jar"
+          urllib.request.urlretrieve(url, "yarn.jar")
+          with zipfile.ZipFile("yarn.jar", "r") as z:
+              z.extractall("yarn_mappings")
+              
+          # Đọc và tạo từ điển mapping
+          mapping_dict = {}
+          with open("yarn_mappings/mappings/mappings.tiny", "r") as f:
+              for line in f:
+                  parts = line.strip().split("\t")
+                  if len(parts) >= 4 and parts[1] == "class":
+                      mapping_dict[parts[0]] = parts[3]
+          
+          # Quét toàn bộ file Java và thay thế
+          for root, dirs, files in os.walk("src"):
+              for file in files:
+                  if file.endswith(".java"):
+                      path = os.path.join(root, file)
+                      with open(path, "r", encoding="utf-8") as f:
+                          content = f.read()
+                      for inter, named in mapping_dict.items():
+                          content = re.sub(r'\b' + inter + r'\b', named, content)
+                      with open(path, "w", encoding="utf-8") as f:
+                          f.write(content)
+          print("Đã tự động chuyển đổi code Java thành công!")
+          PYEOF
+          
+          # Ghi đè file build.gradle.kts sử dụng Yarn mappings chuẩn
           cat > build.gradle.kts << 'EOF'
           plugins {
               id("fabric-loom") version "1.9.2"
@@ -38,21 +67,17 @@ jobs:
           repositories { mavenCentral() }
           dependencies {
               minecraft("com.mojang:minecraft:1.21.4")
-              mappings(files("empty-mappings.tiny"))
+              mappings("net.fabricmc:yarn:1.21.4+build.8:v2")
               modImplementation("net.fabricmc:fabric-loader:0.16.10")
               modImplementation("net.fabricmc.fabric-api:fabric-api:0.119.2+1.21.4")
               compileOnly(files("libs/baritone-api-fabric-1.10.2.jar"))
           }
           tasks.withType<JavaCompile>().configureEach { options.release.set(21) }
-          tasks.matching { it.name == "remapJar" || it.name == "remapSourcesJar" }.configureEach { enabled = false }
           EOF
           
-          # Cài đặt Gradle 8.12
           sed -i 's/gradle-.*-bin.zip/gradle-8.12-bin.zip/' gradle/wrapper/gradle-wrapper.properties
           chmod +x gradlew
-          
-          # Chạy Build với tham số JVM trực tiếp
-          ./gradlew clean build --no-daemon -Dorg.gradle.jvmargs="-Xmx3G --add-modules=jdk.zipfs"
+          ./gradlew clean build --no-daemon
 
       - name: Upload Mod
         uses: actions/upload-artifact@v4
