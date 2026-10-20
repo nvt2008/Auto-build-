@@ -5,19 +5,33 @@ on: [push, workflow_dispatch]
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      _JAVA_OPTIONS: "-Dfile.encoding=UTF-8 --add-modules=jdk.zipfs"
     steps:
       - uses: actions/checkout@v4
 
-      - name: Unzip Source Code
-        run: unzip AutoBuilder-1.0.0-NoKey-Source.zip -d .
-
-      - name: Fix Mappings and Build File
+      - name: Unzip and Setup
         run: |
-          cd AutoBuilder-NoKey-Source
-          # Tạo lại file mappings có cột 'named' để sửa lỗi
-          printf "tiny\t2\t0\tofficial\tintermediary\tnamed\n" > empty-mappings.tiny
+          # Giải nén
+          unzip AutoBuilder-1.0.0-NoKey-Source.zip -d extracted
           
-          # Ghi đè file build.gradle.kts để ép dùng file mappings mới và Java 21
+          # Tìm thư mục chứa file gradlew và di chuyển vào trong đó
+          cd extracted
+          if [ -f "AutoBuilder-NoKey-Source/gradlew" ]; then
+            cd AutoBuilder-NoKey-Source
+          elif [ -d "*/gradlew" ]; then
+            cd */ 
+          fi
+          
+          # Ép Gradle sử dụng đúng Java 21 của GitHub Actions
+          echo "org.gradle.java.home=$JAVA_HOME" > gradle.properties
+          echo "org.gradle.jvmargs=-Xmx3G --add-modules=jdk.zipfs" >> gradle.properties
+          echo "org.gradle.daemon=false" >> gradle.properties
+          
+          # Sửa lại file mappings (thêm cột named)
+          printf "tiny\t2\t0\tofficial\tintermediary\tnamed\n" > empty-mappings.tiny
+
+          # Ghi đè file build.gradle.kts
           cat > build.gradle.kts << 'EOF'
           plugins {
               id("fabric-loom") version "1.9.2"
@@ -35,25 +49,15 @@ jobs:
           tasks.withType<JavaCompile>().configureEach { options.release.set(21) }
           tasks.matching { it.name == "remapJar" || it.name == "remapSourcesJar" }.configureEach { enabled = false }
           EOF
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          java-version: '21'
-          distribution: 'temurin'
-
-      - name: Grant execute permission
-        run: |
-          cd AutoBuilder-NoKey-Source
+          
+          # Cấp quyền và chạy build
           chmod +x gradlew
-
-      - name: Build with Gradle
-        run: |
-          cd AutoBuilder-NoKey-Source
-          ./gradlew build --no-daemon
+          ./gradlew clean build --no-daemon
 
       - name: Upload Mod
         uses: actions/upload-artifact@v4
         with:
           name: Mod-Output
-          path: AutoBuilder-NoKey-Source/build/libs/*.jar
+          path: |
+            extracted/**/build/libs/*.jar
+            extracted/build/libs/*.jar
