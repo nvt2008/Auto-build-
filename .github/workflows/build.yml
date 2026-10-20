@@ -13,21 +13,37 @@ jobs:
         with:
           java-version: '21'
           distribution: 'temurin'
+          java-package: jdk
 
-      - name: Unzip and Clean up
+      - name: Unzip and Setup
         run: |
           unzip AutoBuilder-1.0.0-NoKey-Source.zip -d extracted
           cd extracted/AutoBuilder-NoKey-Source
           
-          # XÓA CACHE RÁC TỪ FILE ZIP CỦA ANDROID
-          rm -rf .gradle
-          rm -rf build
-          rm -rf ~/.gradle/caches
+          # Dọn dẹp cache cũ
+          rm -rf .gradle build
           
-          # Tạo file mappings chuẩn bằng Python (đảm bảo đúng dấu Tab)
-          python3 -c "open('empty-mappings.tiny', 'w').write('tiny\t2\t0\tofficial\tintermediary\tnamed\n')"
+          # Ép nạp module zipfs cho mọi tiến trình Java
+          export JAVA_TOOL_OPTIONS="--add-modules=jdk.zipfs"
+          echo "org.gradle.jvmargs=-Xmx3G --add-modules=jdk.zipfs" > gradle.properties
+          echo "org.gradle.daemon=false" >> gradle.properties
           
-          # Ghi đè file cấu hình build
+          # Tải file mappings thực tế của Fabric
+          wget -q https://maven.fabricmc.net/net/fabricmc/intermediary/1.21.4/intermediary-1.21.4-v2.jar -O intermediary.jar
+          mkdir -p mapped
+          unzip -q intermediary.jar -d mapped
+          
+          # Dùng Python "lách luật": Đổi tên namespace 'intermediary' thành 'named'
+          # Điều này giúp Loom biên dịch trực tiếp các file class_XXXX
+          python3 -c "
+          with open('mapped/mappings/mappings.tiny', 'r') as f:
+              lines = f.readlines()
+          lines[0] = 'tiny\t2\t0\tofficial\tnamed\n'
+          with open('custom-mappings.tiny', 'w') as f:
+              f.writelines(lines)
+          "
+          
+          # Ghi đè file cấu hình Build
           cat > build.gradle.kts << 'EOF'
           plugins {
               id("fabric-loom") version "1.9.2"
@@ -37,7 +53,7 @@ jobs:
           repositories { mavenCentral() }
           dependencies {
               minecraft("com.mojang:minecraft:1.21.4")
-              mappings(files("empty-mappings.tiny"))
+              mappings(files("custom-mappings.tiny"))
               modImplementation("net.fabricmc:fabric-loader:0.16.10")
               modImplementation("net.fabricmc.fabric-api:fabric-api:0.119.2+1.21.4")
               modCompileOnly(files("libs/baritone-api-fabric-1.10.2.jar"))
@@ -47,10 +63,6 @@ jobs:
           EOF
           
           chmod +x gradlew
-          
-          # Thêm biến môi trường _JAVA_OPTIONS để diệt lỗi Provider jar
-          export _JAVA_OPTIONS="-Dfile.encoding=UTF-8 --add-modules=jdk.zipfs"
-          
           ./gradlew clean build --no-daemon
 
       - name: Upload Mod
