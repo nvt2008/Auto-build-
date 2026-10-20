@@ -18,18 +18,19 @@ jobs:
           git clone https://gitlab.com/nguyenviettien8d2008/auto-build.git source
           cd source
           
-          # 1. Dọn dẹp file rác
+          # 1. Dọn dẹp file rác và cache cũ
           rm -rf .gradle build libs
+          rm -rf ~/.gradle
           mkdir -p libs
           wget -q https://github.com/cabaletta/baritone/releases/download/v1.10.2/baritone-api-fabric-1.10.2.jar -O libs/baritone-api-fabric-1.10.2.jar
           
-          # 2. Ép Java 21 và Module zipfs
+          # 2. Ép môi trường Java 21 và nạp module zipfs
           export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
           export PATH=$JAVA_HOME/bin:$PATH
           export JAVA_TOOL_OPTIONS="--add-modules=jdk.zipfs"
           
+          # Cấu hình Gradle (Không gộp tham số JVM vào đây)
           echo "org.gradle.java.home=$JAVA_HOME" > gradle.properties
-          echo "org.gradle.jvmargs=-Xmx3G --add-modules=jdk.zipfs" >> gradle.properties
           echo "org.gradle.daemon=false" >> gradle.properties
           
           # 3. Tạo file mappings rỗng chuẩn bằng Python
@@ -54,13 +55,10 @@ jobs:
           tasks.matching { it.name == "remapJar" || it.name == "remapSourcesJar" }.configureEach { enabled = false }
           EOF
           
-          # 5. Sửa file gradlew để luôn nạp jdk.zipfs
-          sed -i 's/DEFAULT_JVM_OPTS=.*/DEFAULT_JVM_OPTS='"'"'"-Xmx3G --add-modules=jdk.zipfs"'"'"'/' gradlew
-          
           sed -i 's/gradle-.*-bin.zip/gradle-8.12-bin.zip/' gradle/wrapper/gradle-wrapper.properties
           chmod +x gradlew
           
-          # 6. Chạy Build
+          # 5. Chạy Build
           ./gradlew clean build --no-daemon
 
       - name: Upload Mod
