@@ -13,30 +13,59 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y openjdk-21-jdk
 
-      - name: Clone and Build
+      - name: Clone and Auto-Convert
         run: |
           git clone https://gitlab.com/nguyenviettien8d2008/auto-build.git source
           cd source
           
-          # 1. Dọn dẹp file rác và cache cũ
+          # 1. Dọn dẹp
           rm -rf .gradle build libs
-          rm -rf ~/.gradle
+          rm -rf ~/.gradle/caches
           mkdir -p libs
           wget -q https://github.com/cabaletta/baritone/releases/download/v1.10.2/baritone-api-fabric-1.10.2.jar -O libs/baritone-api-fabric-1.10.2.jar
           
-          # 2. Ép môi trường Java 21 và nạp module zipfs
+          # 2. Ép Java 21
           export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
           export PATH=$JAVA_HOME/bin:$PATH
-          export JAVA_TOOL_OPTIONS="--add-modules=jdk.zipfs"
           
-          # Cấu hình Gradle (Không gộp tham số JVM vào đây)
           echo "org.gradle.java.home=$JAVA_HOME" > gradle.properties
           echo "org.gradle.daemon=false" >> gradle.properties
           
-          # 3. Tạo file mappings rỗng chuẩn bằng Python
-          python3 -c "open('empty-mappings.tiny', 'w').write('tiny\t2\t0\tofficial\tintermediary\n')"
+          # 3. Chạy script Python chuyển đổi code
+          python3 << 'PYEOF'
+          import os, re, urllib.request, zipfile
           
-          # 4. Ghi đè file build.gradle.kts
+          url = "https://maven.fabricmc.net/net/fabricmc/yarn/1.21.4+build.8/yarn-1.21.4+build.8-v2.jar"
+          urllib.request.urlretrieve(url, "yarn.jar")
+          with zipfile.ZipFile("yarn.jar", "r") as z:
+              z.extractall("yarn_mappings")
+              
+          mapping_dict = {}
+          with open("yarn_mappings/mappings/mappings.tiny", "r") as f:
+              for line in f:
+                  if line.startswith("c\t"):
+                      parts = line.strip().split("\t")
+                      if len(parts) >= 3:
+                          mapping_dict[parts[1]] = parts[2]
+          
+          for root, dirs, files in os.walk("src"):
+              for file in files:
+                  if file.endswith(".java"):
+                      path = os.path.join(root, file)
+                      with open(path, "r", encoding="utf-8") as f:
+                          content = f.read()
+                      for inter, named in mapping_dict.items():
+                          named_pkg = named.replace("/", ".")
+                          content = re.sub(r'import net\.minecraft\.' + inter + r'\s*;', f'import {named_pkg};', content)
+                          content = re.sub(r'import ' + inter + r'\s*;', f'import {named_pkg};', content)
+                          short_name = named.split("/")[-1]
+                          content = re.sub(r'\b' + inter + r'\b', short_name, content)
+                      with open(path, "w", encoding="utf-8") as f:
+                          f.write(content)
+          print("Đã chuyển đổi code Java thành công!")
+          PYEOF
+          
+          # 4. Cấu hình build với Yarn mappings
           cat > build.gradle.kts << 'EOF'
           plugins {
               id("fabric-loom") version "1.9.2"
@@ -46,19 +75,18 @@ jobs:
           repositories { mavenCentral() }
           dependencies {
               minecraft("com.mojang:minecraft:1.21.4")
-              mappings(files("empty-mappings.tiny"))
+              mappings("net.fabricmc:yarn:1.21.4+build.8:v2")
               modImplementation("net.fabricmc:fabric-loader:0.16.10")
               modImplementation("net.fabricmc.fabric-api:fabric-api:0.119.2+1.21.4")
               compileOnly(files("libs/baritone-api-fabric-1.10.2.jar"))
           }
           tasks.withType<JavaCompile>().configureEach { options.release.set(21) }
-          tasks.matching { it.name == "remapJar" || it.name == "remapSourcesJar" }.configureEach { enabled = false }
           EOF
           
           sed -i 's/gradle-.*-bin.zip/gradle-8.12-bin.zip/' gradle/wrapper/gradle-wrapper.properties
           chmod +x gradlew
           
-          # 5. Chạy Build
+          # 5. Build
           ./gradlew clean build --no-daemon
 
       - name: Upload Mod
