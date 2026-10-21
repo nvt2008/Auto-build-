@@ -5,8 +5,6 @@ on: [push, workflow_dispatch]
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8 --add-modules=jdk.zipfs"
     steps:
       - uses: actions/checkout@v4
 
@@ -16,7 +14,7 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Clone and Setup
+      - name: Clone and Build
         run: |
           git clone https://gitlab.com/nguyenviettien8d2008/auto-build.git source
           cd source
@@ -26,35 +24,15 @@ jobs:
           mkdir -p libs
           wget -q https://github.com/cabaletta/baritone/releases/download/v1.10.2/baritone-api-fabric-1.10.2.jar -O libs/baritone-api-fabric-1.10.2.jar
           
-          echo "org.gradle.daemon=false" > gradle.properties
+          # Tạo gradle.properties với jvmargs để đảm bảo module zipfs được nạp
+          echo "org.gradle.jvmargs=-Xmx3G --add-modules=jdk.zipfs" > gradle.properties
+          echo "org.gradle.daemon=false" >> gradle.properties
+          echo "org.gradle.java.home=$JAVA_HOME" >> gradle.properties
           
-          # Tải Yarn mappings
-          wget -q https://maven.fabricmc.net/net/fabricmc/yarn/1.21.4+build.8/yarn-1.21.4+build.8-v2.jar -O yarn.jar
-          mkdir -p yarn_extracted
-          unzip -q yarn.jar -d yarn_extracted
+          # Tạo file mappings rỗng chuẩn
+          python3 -c "open('empty-mappings.tiny', 'w').write('tiny\t2\t0\tofficial\tintermediary\n')"
           
-          # Tạo custom mappings (Named = Intermediary) để code class_XXXX biên dịch được
-          python3 << 'PYEOF'
-          with open("yarn_extracted/mappings/mappings.tiny", "r") as f:
-              lines = f.readlines()
-          out_lines = [lines[0]]
-          for line in lines[1:]:
-              if line.startswith("c\t"):
-                  parts = line.strip().split("\t")
-                  parts[2] = parts[1]
-                  out_lines.append("\t".join(parts) + "\n")
-              elif line.startswith("\tm\t") or line.startswith("\tf\t"):
-                  parts = line.strip().split("\t")
-                  if len(parts) >= 4:
-                      parts[3] = parts[2]
-                  out_lines.append("\t".join(parts) + "\n")
-              else:
-                  out_lines.append(line)
-          with open("custom-mappings.tiny", "w") as f:
-              f.writelines(out_lines)
-          print("Custom mappings created.")
-          PYEOF
-          
+          # Ghi đè build.gradle.kts
           cat > build.gradle.kts << 'EOF'
           plugins {
               id("fabric-loom") version "1.9.2"
@@ -64,7 +42,7 @@ jobs:
           repositories { mavenCentral() }
           dependencies {
               minecraft("com.mojang:minecraft:1.21.4")
-              mappings(files("custom-mappings.tiny"))
+              mappings(files("empty-mappings.tiny"))
               modImplementation("net.fabricmc:fabric-loader:0.16.10")
               modImplementation("net.fabricmc.fabric-api:fabric-api:0.119.2+1.21.4")
               compileOnly(files("libs/baritone-api-fabric-1.10.2.jar"))
